@@ -1,9 +1,16 @@
 #!/usr/bin/env bash
 # Setup script for TripoSR on macOS (Apple Silicon / CPU)
-# Clones the repo, patches for macOS compatibility, and installs deps.
+# Clones the repo, patches for macOS compatibility, and installs deps via uv.
 set -euo pipefail
 
 REPO_DIR="triposr"
+
+# Ensure uv is available
+if ! command -v uv &>/dev/null; then
+  echo "==> Installing uv..."
+  curl -LsSf https://astral.sh/uv/install.sh | sh
+  export PATH="$HOME/.local/bin:$PATH"
+fi
 
 echo "==> Cloning TripoSR..."
 if [ -d "$REPO_DIR" ]; then
@@ -14,18 +21,17 @@ fi
 
 cd "$REPO_DIR"
 
-echo "==> Creating virtual environment..."
-python3 -m venv .venv
+echo "==> Creating virtual environment with uv..."
+uv venv .venv
 source .venv/bin/activate
 
 echo "==> Installing dependencies..."
-pip install -U pip setuptools wheel -q
 
 # PyTorch (CPU / Apple Silicon MPS)
-pip install torch torchvision torchaudio -q
+uv pip install torch torchvision torchaudio
 
 # Core deps (skip xatlas — fails to build on macOS arm64)
-pip install \
+uv pip install \
   omegaconf==2.3.0 \
   Pillow==10.1.0 \
   einops==0.7.0 \
@@ -33,24 +39,19 @@ pip install \
   rembg \
   huggingface-hub \
   "imageio[ffmpeg]" \
-  gradio \
-  -q
+  gradio
 
 # rembg needs onnxruntime
-pip install onnxruntime -q
+uv pip install onnxruntime
 
 # Fix GLB export on NumPy 2.x (upstream pins trimesh too old)
-pip install -U trimesh -q
+uv pip install -U trimesh
 
 # torchmcubes (marching cubes on CPU/CUDA)
-pip install git+https://github.com/tatsy/torchmcubes.git -q
+uv pip install "torchmcubes @ git+https://github.com/tatsy/torchmcubes.git"
 
 echo ""
 echo "==> Patching run.py for macOS compatibility..."
-
-# Patch 1: Lazy-import xatlas/moderngl (only needed for --bake-texture)
-# Patch 2: Ensure output dirs exist even with --no-remove-bg
-# We apply patches only if they haven't been applied yet.
 
 if ! grep -q "Lazy import so non-textured" run.py 2>/dev/null; then
   python3 - <<'PATCH_SCRIPT'
@@ -59,8 +60,6 @@ import re
 with open("run.py", "r") as f:
     content = f.read()
 
-# Add os.makedirs for --no-remove-bg case (before "Running model" log line)
-# Look for the loop that processes each image
 old_loop = '''    logging.info(f"Running image {i + 1}/{len(images)} ...")
 
     timer.start("Running model")'''
@@ -75,7 +74,6 @@ new_loop = '''    logging.info(f"Running image {i + 1}/{len(images)} ...")
 if old_loop in content:
     content = content.replace(old_loop, new_loop)
 
-# Make xatlas/bake_texture import lazy (wrap in try/except inside --bake-texture block)
 old_bake = '''    if args.bake_texture:
         import xatlas'''
 
@@ -86,7 +84,6 @@ new_bake = '''    if args.bake_texture:
 
 if old_bake in content and "Lazy import" not in content:
     content = content.replace(old_bake, new_bake)
-    # Add except block after the xatlas import line
     content = content.replace(
         "        from tsr.bake_texture import bake_texture\n",
         "            from tsr.bake_texture import bake_texture\n"

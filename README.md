@@ -5,11 +5,13 @@ Research and tools for converting 2D images into 3D meshes (OBJ/GLB) usable in S
 ## Quick Start: TripoSR on Mac (CPU)
 
 ```bash
-./setup-triposr.sh
+./setup-triposr.sh          # uses uv for fast dependency installation
 source triposr/.venv/bin/activate
 cd triposr
 python run.py examples/chair.png --device cpu --mc-resolution 128
 ```
+
+> Requires [uv](https://github.com/astral-sh/uv). The script will install it automatically if missing.
 
 Output: `triposr/output/0/mesh.obj` (or `.glb` with `--model-save-format glb`)
 
